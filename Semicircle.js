@@ -27,20 +27,21 @@
     }
 
     // rotate point [x + r, y+r] around [x, y] by `angle` radians.
-    function rotated (p, angle, r) {
+    function rotated (p, angle, r, r2) {
         return p.add(
-            L.point(Math.cos(angle), Math.sin(angle)).multiplyBy(r)
+            L.point(Math.cos(angle) * r, Math.sin(angle) * r2)
         );
     }
 
-    L.Point.prototype.rotated = function (angle, r) {
-        return rotated(this, angle, r);
+    L.Point.prototype.rotated = function (angle, r, r2) {
+        return rotated(this, angle, r, r2);
     };
 
     var semicircle = {
         options: {
             startAngle: 0,
-            stopAngle: 359.9999
+            stopAngle: 359.9999,
+            arc: false
         },
 
         startAngle: function () {
@@ -82,11 +83,11 @@
         },
 
         isSemicircle: function () {
-            var startAngle = this.options.startAngle,
-                stopAngle = this.options.stopAngle;
+            var startAngle = this.startAngle(),
+                stopAngle = this.stopAngle();
 
             return (
-                !(startAngle === 0 && stopAngle > 359) &&
+                !(stopAngle >= startAngle + 2 * Math.PI) &&
                 !(startAngle == stopAngle)
             );
         },
@@ -140,19 +141,36 @@
                 return this._setPath(layer, 'M0 0');
             }
 
-            var p = layer._map.latLngToLayerPoint(layer._latlng),
-                r = layer._radius,
-                r2 = Math.round(layer._radiusY || r),
-                start = p.rotated(layer.startAngle(), r),
-                end = p.rotated(layer.stopAngle(), r);
+            var p0 = layer._map.latLngToLayerPoint(layer._latlng),
+                p1 = layer._point,
+                r = Math.max(Math.round(layer._radius), 1),
+                r2 = Math.max(Math.round(layer._radiusY), 1) || r,
+                arc = 'A' + r + ',' + r2 + ' 0 ',
+                start = p1.rotated(layer.startAngle(), r, r2),
+                end = p1.rotated(layer.stopAngle(), r, r2);
 
-            var largeArc = (layer.options.stopAngle - layer.options.startAngle >= 180) ? '1' : '0';
+            var largeArc = (layer.stopAngle() - layer.startAngle() >= Math.PI) ? '1' : '0';
 
-            var d = 'M' + p.x + ',' + p.y +
-                // line to first start point
-                'L' + start.x + ',' + start.y +
-                'A ' + r + ',' + r2 + ',0,' + largeArc + ',1,' + end.x + ',' + end.y +
-                ' z';
+
+            var d = !L.Browser.vml ?
+                    !layer.options.arc ?
+                    'M' + p0.x + ',' + p0.y +
+                    // line to first start point
+                    'L' + start.x + ',' + start.y +
+                    arc + largeArc + ',1 ,' + end.x + ',' + end.y + ' z' :
+                    // arc
+                    'M' + start.x + ',' + start.y +
+                    arc + largeArc + ',1 ,' + end.x + ',' + end.y :
+                  //  VML for IE8
+                    !layer.options.arc ?
+                    'M' + p0.round().x + ',' + p0.round().y + ' ' +
+                    'AE ' + p1.round().x + ',' + p1.round().y + ' ' + r + ',' + r2 + ' ' +
+                    (65535 * (90 - layer.options.stopAngle)) + ',' +
+                    (65535 * (layer.options.stopAngle - layer.options.startAngle)) + ' x':
+                    // arc
+                    'AL ' + p1.round().x + ',' + p1.round().y + ' ' + r + ',' + r2 + ' ' +
+                    (65535 * (90 - layer.options.stopAngle)) + ',' +
+                    (65535 * (layer.options.stopAngle - layer.options.startAngle));
 
             this._setPath(layer, d);
         }
@@ -165,12 +183,13 @@
                 !layer.isSemicircle()) {
                 return _updateCircleCanvas.call(this, layer);
             }
+            if (!this._drawing || layer._empty()) { return; }
 
-            var p = layer._point,
+            var p0 = layer._map.latLngToLayerPoint(layer._latlng),
+                p1 = layer._point,
                 ctx = this._ctx,
-                r = layer._radius,
-                s = (layer._radiusY || r) / r,
-                start = p.rotated(layer.startAngle(), r);
+                r = Math.max(Math.round(layer._radius), 1),
+                s = (Math.max(Math.round(layer._radiusY), 1) || r)  / r;
 
             this._drawnLayers[layer._leaflet_id] = layer;
 
@@ -180,10 +199,9 @@
             }
 
             ctx.beginPath();
-            ctx.moveTo(p.x, p.y);
-            ctx.lineTo(start.x, start.y);
-            ctx.arc(p.x, p.y, r, layer.startAngle(), layer.stopAngle());
-            ctx.lineTo(p.x, p.y);
+            if (!layer.options.arc) { ctx.moveTo(p0.x, p0.y); }
+            ctx.arc(p1.x, p1.y / s, r, layer.startAngle(), layer.stopAngle(), false);
+            if (!layer.options.arc) { ctx.lineTo(p0.x, p0.y); }
 
             if (s !== 1) {
                 ctx.restore();
