@@ -28,8 +28,14 @@
 
     // rotate point [x + r, y+r] around [x, y] by `angle` radians.
     function rotated (p, angle, r, r2) {
+        if (Math.cos(angle) == 0.0) {
+            angle2 = angle;
+        } else {
+            angle2 = Math.atan(r / r2 * Math.tan(angle));
+            if (Math.cos(angle) < 0) angle2 += Math.PI;
+        }
         return p.add(
-            L.point(Math.cos(angle) * r, Math.sin(angle) * r2)
+            L.point(Math.cos(angle2) * r, Math.sin(angle2) * r2)
         );
     }
 
